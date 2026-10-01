@@ -1,9 +1,9 @@
-function a() {
+function quickRand() {
     return (BigInt(Math.floor(Math.random() * 0x100000000)) << 32n) + 
             BigInt(Math.floor(Math.random() * 0x100000000));
 }
 
-class c {
+class Board {
     #rows;
     #cols;
     #rand1;
@@ -16,8 +16,8 @@ class c {
     #interactable;
     #draggable
     constructor(a = 6, b = 5,
-        c = window.a(),
-        d = window.a()) {
+        c = window.quickRand(),
+        d = window.quickRand()) {
         this.#rows = a,   
         this.#cols = b,   
         this.#rand1 = c,  
