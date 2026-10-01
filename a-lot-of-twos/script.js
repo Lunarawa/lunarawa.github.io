@@ -3,6 +3,14 @@ function quickRand() {
             BigInt(Math.floor(Math.random() * 0x100000000));
 }
 
+function mouseLocation(e) {
+    const r = window.canvas.getBoundingClientRect();
+    return {
+        x: e.clientX - r.left,
+        y: e.clientY - r.top
+    };
+}
+
 class Board {
     #rows;
     #cols;
@@ -14,7 +22,8 @@ class Board {
     #level;
     #board;
     #interactable;
-    #draggable
+    #dragging;
+    #sequence;
     constructor(a = 6, b = 5,
         c = window.quickRand(),
         d = window.quickRand()) {
@@ -26,10 +35,11 @@ class Board {
         this.#lscore = 0n,
         this.#cap = 0n,
         this.#level = 0n, 
-        // TODO: negative indices
-        this.#board = Array.from({length: this.#rows}, () => Array(this.rand1ols).fill(0n)),
+        // + a for visible board, otherwise it's hidden
+        this.#board = Array.from({length: this.#rows * 2}, () => Array(this.#cols).fill(0n)),
         this.#interactable = !1,
-        this.#draggable = !1;
+        this.#dragging = !1;
+        this.#sequence = Array(0);
     }
     #rand() {
         const a = this.#rand1;
@@ -38,4 +48,32 @@ class Board {
         const c = Number(a >> 59n);
         return ((b >>> c) | b << ((-c) & 31)) >>> 0;
     }
+    mouseDown(e) {
+        if (!this.#interactable) return;
+        // mouse location validation here (TODO)
+        this.#dragging = !0;
+        const p = mouseLocation(e);
+        // start the drag logic here (TODO)
+    }
+    mouseDrag(e) {
+        if (!this.#dragging) return;
+        const p = mouseLocation(e);
+        // select tile by dragging here (TODO)
+    }
+    mouseUp(e) {
+        if (this.#sequence.length < 2) return;  // (TODO) remove sequence and reset board
+        // the crux here (TODO)
+    }
+}
+
+window.onload = () => {
+    const cellSize = 50,
+          separatorSize = 10,
+          canvas = document.getElementById('field'),
+          ctx = canvas.getContext("2d");
+
+    let board = new Board();
+    canvas.addEventListener('mousedown', (e) => board.mouseDown(e));
+    canvas.addEventListener('mousemove', (e) => board.mouseDrag(e));
+    window.addEventListener('mouseup',   (e) => board.mouseUp  (e));
 }
