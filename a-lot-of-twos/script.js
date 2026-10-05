@@ -3,6 +3,15 @@ let cellSize = 50,
     font = "13px JetBrains Mono",  // hopefully
     interval = 200;  // ms
 
+const sqrt6 = Math.sqrt(6);
+
+function idkHowToNameTheVariables(n){
+    const v = 1000n * n * n * 5n ** n / 4n ** n;
+    const d = v.toString().length;
+    const f = 10n ** BigInt(d - 3);
+    return v / f * f;
+}
+
 function quickRand() {
     return (BigInt(Math.floor(Math.random() * 0x100000000)) << 32n) + 
             BigInt(Math.floor(Math.random() * 0x100000000));
@@ -36,6 +45,7 @@ function number(n) {
     else if (typeof n !== 'bigint') n = BigInt(Math.trunc(Number(n)));
     const p = n < 0n ? (n = -n, '-') : '';
     if (n < 1000000n) return p + n.toString();
+    // arbitrary
     const e2 = ["", "C", "Dc", "Tc", "Qg", "Qi", "Ss", "Si", "Ot", "Ng"];
     const e1 = ["", "De", "V", "Tr", "Qu", "Qn", "Sx", "St", "Oc", "Nn"];
     const e0 = ["", "U", "D", "T", "Qd", "Qt", "S", "Sp", "O", "N"];
@@ -120,9 +130,10 @@ class Board {
     #rand2;
     #score;
     #lscore;
+    #level;
     #cap;
     #min;
-    #level;
+    #max;
     #board;
     #interactable;
     #dragging;
@@ -137,11 +148,12 @@ class Board {
         this.#rand2 = d,
         this.#score = 0n,
         this.#lscore = 0n,
-        this.#cap = 0n,
-        this.#min = 1n;
-        this.#level = 0n,
+        this.#level = 1n,
+        this.#cap = 1250n,
+        this.#min = 1n,
+        this.#max = 6n;
         // + a for visible board, otherwise it's hidden
-        this.#board = Array.from({length: this.#rows * 2}, () => Array(this.#cols).fill(0n)),
+        this.#board = Array.from({length: this.#rows * 2}, () => Array(this.#cols).fill(BigInt(1 + this.#rand() % 6))),
         this.#interactable = !1,
         this.#dragging = !1;
         this.#sequence = Array(0);
@@ -157,23 +169,125 @@ class Board {
         if (!this.#interactable) return;
         // mouse location validation here (TODO)
         this.#dragging = !0;
-        const p = mouseLocation(c, e);
+        this.drawSeq(c.getContext("2d"), c, e);
         // start the drag logic here (TODO)
     }
     mouseDrag(c, e) {
         if (!this.#dragging) return;
-        const p = mouseLocation(c, e);
-        // select tile by dragging here (TODO)
+        // drag logic goes here (TODO)
+        this.drawSeq(c.getContext("2d"), c, e);
     }
     mouseUp(ctx, e) {
-        if (this.#sequence.length < 2) return;  // (TODO) remove sequence and reset board
-        // the crux here (TODO)
+        if (this.#sequence.length < 2) {
+            this.resetSeq(ctx);
+            return;
+        }
+        if (this.#sequence[0] !== this.#sequence[1]) {
+            this.resetSeq(ctx);
+            return;
+        }
+        let t = 0n;
+        const a = [];
+        const d = this.#sequence.at(-1);
+        let l = this.#board[this.#sequence[0][1]][this.#sequence[0][0]];
+        for (let v of this.#sequence.entries()) {
+            const q = this.#board[v[1][1]][v[1][0]] - l;
+            if (q !== 1n && q !== 0n) {
+                this.resetSeq(ctx);
+                return;
+            }
+            t += 1n << this.#board[v[1][1]][v[1][0]];
+            a.push(new AnimationF(v[1], d, this.#board[v[1][1]][v[1][0]]));
+            this.#board[v[1][1]][v[1][0]] = 0n;
+        }
+        this.draw(ctx, a, 1);
+        const i = BigInt((t - 1n).toString(2).length);
+        t = 1n << i;
+        this.#score += t;
+        this.#lscore += t;
+        while (this.#lscore >= this.#cap) {
+            this.#level++;
+            this.#lscore -= this.#cap;
+            this.#cap = idkHowToNameTheVariables(this.#level);
+        }
+        let lscore;
+        let cap;
+        let score;
+        if (this.#lscore >= 1000000n) lscore = `${this.#lscore} (${number(this.#lscore)})`;
+        else lscore = `${this.#lscore}`;
+        if (this.#cap >= 1000000n) cap = `${number(this.#cap)}`;
+        else cap = `${this.#cap}`;
+        if (this.#score >= 1000000n) score = `${this.#score} (${number(this.#score)})`;
+        else score = `${this.#score}`;
+        document.getElementById("score").textContent = `${lscore} / ${cap} (${score} pts, level ${this.#level})`;
+        this.gravity(ctx);
+        while (2n * this.#min + 10n < i) {
+            this.#min += 1n;
+            for (let [yi, yv] of this.#board.entries())
+                for (let [xi, xv] of yv.entries())
+                    if (xv < this.#min)
+                        this.#board[yi][xi] = 0n;
+        }
+        this.gravity(ctx);
+    }
+    drawSeq(ctx, c, e) {
+        const p = mouseLocation(c, e);
+        requestAnimationFrame(() => {
+            ctx.fillStyle = "#a7692a";
+            ctx.fillRect(
+                0, 0,
+                (cellSize + separatorSize) * this.#cols + separatorSize,
+                (cellSize + separatorSize) * this.#rows + separatorSize
+            );
+            if (this.#sequence.length) {
+                function center ([x, y]) { 
+                    return [
+                        x * (cellSize + separatorSize) + separatorSize + cellSize / 2,
+                        y * (cellSize + separatorSize) + separatorSize + cellSize / 2
+                    ];
+                }
+                ctx.beginPath();
+                const [x1, y1] = center(this.#sequence[0]);
+                ctx.moveTo(x1, y1);
+                for (const pos of this.#sequence.slice(1)) {
+                    const [x2, y2] = center(pos);
+                    ctx.lineTo(x2, y2);
+                }
+                const r2 = (cellSize / 2) ** 2;
+                const s = this.#board.slice(this.#cols).some((row, y) =>
+                    row.some((t, x) => {
+                        if (t === 0n) return false;
+                        const [tx, ty] = center([x, y]);
+                        return (p[0] - tx) ** 2 + (p[1] - ty) ** 2 < r2;
+                    })
+                );
+                if (!s) ctx.lineTo(p[0], p[1]);
+                ctx.stroke();
+            }
+            // refactoring later
+            for (const [y, r] of this.#board.slice(this.#cols).entries())
+                for (const [x, t] of r.entries()) {
+                    if (t === 0n) continue;
+                    const tx = x * (cellSize + separatorSize) + separatorSize;
+                    const ty = y * (cellSize + separatorSize) + separatorSize;
+                    ctx.fillStyle = color(t);
+                    ctx.roundRect(tx, ty, cellSize, cellSize, 5);
+                    ctx.fill();
+                    ctx.fillStyle = "#FFF";
+                    ctx.fillText(number(2n ** t), tx + cellSize / 2, ty + cellSize / 2, cellSize);
+                }
+            ctx.restore();
+        });
+    }
+    resetSeq(ctx) {
+        this.#sequence = [];
+        this.drawSeq(ctx);
     }
     gravity(ctx) {  // never tested
         let S = Array.from({length: this.#rows * 2}, () => Array(this.#cols).fill(0))
         for (let y of this.#board.entries())
             for (let x of y[1].entries())
-                S[y[0]][x[0]] = (this.#board[y[0] + 1] !== undefined && this.#board[y[0] + 1][x[0]] === 0n) >> 0;
+                S[y[0]][x[0]] = (y[0] < this.#rows * 2 - 1 && this.#board[y[0] + 1][x[0]] === 0n) >> 0;
         if (!S.some(r => r.some(v => v))) return;
         let placeholder = deepCopy2D(this.#board);
         let anims = []
@@ -183,7 +297,7 @@ class Board {
                     anims.push(new AnimationF([x[0], y[0]], [x[0], y[0] + 1], x[1], t => t * t));
                     this.#board[y[0]][x[0]] = 0n;
                 }
-        requestAnimationFrame(T => this.draw(ctx, anims, 2, T));
+        requestAnimationFrame(timestamp => this.draw(ctx, anims, 2, timestamp));
         while (S.some(r => r.some(v => v))) {
             this.#board = placeholder;
             anims.length = [];
@@ -201,13 +315,17 @@ class Board {
                     if (S[y][x] === 1 && (y < this.#rows * 2 - 1 || this.#board[y + 1][x] !== 0n))
                         S[y][x] = 2;
                     if (S[y][x] === 1) anims.push(new AnimationF([x, y - this.#rows], [x, y + 1 - this.#rows], this.#board[y][x]));
-                    if (S[y][x] === 2) anims.push(new AnimationF([x, y - this.#rows], [x, y - 1 - this.#rows], this.#board[y][x], t => t * (1 - t / 2)));
+                    if (S[y][x] === 2) anims.push(new AnimationF([x, y - this.#rows], [x, y - 1 - this.#rows], this.#board[y][x], x => x < (6 - sqrt6) / 5 ? 
+                        -(7 + 2 * sqrt6) *  x      * (5 * x + sqrt6 - 6) / 45
+                        :
+                        -(7 + 2 * sqrt6) * (x - 1) * (5 * x + sqrt6 - 6) / 45
+                    ));
                 }
             placeholder = deepCopy2D(this.#board);
             for (let y = this.#rows * 2 - 1; y >= 0; y--)
                 for (let x = 0; x < this.#cols; x++) 
                     if (S[y][x]) this.#board[y][x] = 0n;
-            requestAnimationFrame(T => this.draw(ctx, anims, 2, T))
+            requestAnimationFrame(timestamp => this.draw(ctx, anims, 2, timestamp))
         }
         for (let x = 0; x < this.#cols; x++)
             for (let y = this.#rows - 1; y >= 0; y--)
@@ -238,13 +356,19 @@ class Board {
                     ctx.fill();
                 }
         for (let a of A) a.tileDraw(ctx, alpha);
-        requestAnimationFrame(T => this.draw(ctx, A, m = 1, T));
+        requestAnimationFrame(timestamp => this.draw(ctx, A, m, timestamp));
     }
 }
 
 window.onload = () => {
-    const canvas = document.getElementById('field'),
-          ctx = canvas.getContext("2d");
+    const canvas = document.getElementById('field');
+    const ctx = canvas.getContext("2d");
+
+    ctx.strokeStyle = "#FF0";
+    ctx.lineWidth = separatorSize;
+    ctx.font = font;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
 
     let board = new Board();
     canvas.addEventListener('mousedown', (e) => board.mouseDown(canvas, e));
