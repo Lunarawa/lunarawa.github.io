@@ -27,7 +27,7 @@ function mouseLocation(c, e) {
 }
 
 function color(n) {
-    n = Number(n);
+    n = Number(n) - 1;
     const g = 0.618033988749895,
           h = (g * n * 120) % 360,
           o = 1.8,
@@ -106,10 +106,11 @@ class AnimationF {
         this.func = rateFunc;
     }
     tileDraw(ctx, a) {
-        alpha = this.func(a);
+        const alpha = this.func(a);
         ctx.fillStyle = color(this.tile);
         const x = this.pos1[0] + alpha * (this.pos2[0] - this.pos1[0]);
         const y = this.pos1[1] + alpha * (this.pos2[1] - this.pos1[1])
+        ctx.beginPath();
         ctx.roundRect(
             x,
             y,
@@ -119,7 +120,7 @@ class AnimationF {
         );
         ctx.fill();
         ctx.fillStyle = "#FFF";
-        ctx.fillText(number(2n**this.tile, x, y + cellSize / 2, cellSize));
+        ctx.fillText(number(2n ** this.tile), x + cellSize / 2, y + cellSize / 2, cellSize);
     }
 }
 
@@ -137,13 +138,23 @@ class Board {
     #board;
     #interactable;
     #dragging;
-    #sequence;
-    #animStart;
+    #seq;
+    #animS;
+    #animF;
+    #rand() {
+        const a = this.#rand1;
+        this.#rand1 = (a * 6364136223846793005n + (this.#rand2 | 1n)) & 0xffffffffffffffffn;
+        const b = Number(((a >> 18n) ^ a) >> 27n) >>> 0;
+        const c = Number(a >> 59n);
+        return ((b >>> c) | b << ((-c) & 31)) >>> 0;
+    }
     constructor(a = 6, b = 5,
         c = window.quickRand(),
-        d = window.quickRand()) {
+        d = window.quickRand(), ctx = window.ctx) {  // idk lmao
         this.#rows = a,
         this.#cols = b,
+        this.rand1 = c,
+        this.rand2 = d,
         this.#rand1 = c,
         this.#rand2 = d,
         this.#score = 0n,
@@ -152,56 +163,103 @@ class Board {
         this.#cap = 1250n,
         this.#min = 1n,
         this.#max = 6n;
-        // + a for visible board, otherwise it's hidden
-        this.#board = Array.from({length: this.#rows * 2}, () => Array(this.#cols).fill(BigInt(1 + this.#rand() % 6))),
-        this.#interactable = !1,
+        this.#board = Array.from({length: this.#rows * 2}, () =>
+            Array.from({length: this.#cols}, () => BigInt(1 + this.#rand() % 6))
+        ),
         this.#dragging = !1;
-        this.#sequence = Array(0);
-    }
-    #rand() {
-        const a = this.#rand1;
-        this.#rand1 = (a * 6364136223846793005n + (this.#rand2 | 1n)) & 0xffffffffffffffffn;
-        const b = Number(((a >> 18n) ^ a) >> 27n) >>> 0;
-        const c = Number(a >> 59n);
-        return ((b >>> c) | b << ((-c) & 31)) >>> 0;
+        this.#seq = Array(0);
+        this.#animS = 0;
+        this.#animF = 0;
+        this.gravity(ctx);
+        this.gravity(ctx);
+        this.#interactable = !0;
     }
     mouseDown(c, e) {
         if (!this.#interactable) return;
-        // mouse location validation here (TODO)
+        const p = mouseLocation(c, e);
+        let t;
+        for (let y = 0; y < this.#rows && !t; y++)
+            for (let x = 0; x < this.#cols; x++) {
+                const left = x * (cellSize + separatorSize) + separatorSize;
+                const top = y * (cellSize + separatorSize) + separatorSize;
+                if (p[0] >= left && p[0] < left + cellSize &&
+                    p[1] >= top && p[1] < top + cellSize &&
+                    this.#board[y + this.#rows][x] !== 0n) {
+                    t = [x, y];
+                    break;
+                }
+            }
+        if (!t) return;
         this.#dragging = !0;
+        this.#seq = [t];
         this.drawSeq(c.getContext("2d"), c, e);
-        // start the drag logic here (TODO)
     }
     mouseDrag(c, e) {
         if (!this.#dragging) return;
-        // drag logic goes here (TODO)
+        const p = mouseLocation(c, e);
+        const r2 = (cellSize / 2) ** 2;
+        let t;
+        for (let y = 0; y < this.#rows && !t; y++)
+            for (let x = 0; x < this.#cols; x++) {
+                if (this.#board[y + this.#rows][x] === 0n) continue;
+                const tx = x * (cellSize + separatorSize) + separatorSize + cellSize / 2;
+                const ty = y * (cellSize + separatorSize) + separatorSize + cellSize / 2;
+                if ((p[0] - tx) ** 2 + (p[1] - ty) ** 2 < r2) {
+                    t = [x, y];
+                    break;
+                }
+            }
+        if (!t) {
+            this.drawSeq(c.getContext("2d"), c, e);
+            return;
+        }
+        const [x, y] = t;
+        const tv = this.#board[y + this.#rows][x];
+        const I = this.#seq.findIndex(([vx, vy]) => vx === x && vy === y);
+        if (I !== -1) {
+            if (I === this.#seq.length - 2)
+                this.#seq.pop();
+        } else {
+            const lt = this.#seq.at(-1);
+            const lv = this.#board[lt[1] + this.#rows][lt[0]];
+            const adjacent = Math.max(Math.abs(x - lt[0]), Math.abs(y - lt[1])) <= 1;
+            if (adjacent && ((this.#seq.length === 1 && tv === lv) ||
+                (this.#seq.length > 1 && (tv === lv || tv === lv + 1n))))
+                this.#seq.push(t);
+        }
         this.drawSeq(c.getContext("2d"), c, e);
     }
     mouseUp(ctx, e) {
-        if (this.#sequence.length < 2) {
+        this.#dragging = !1;
+        if (this.#seq.length < 2) {
             this.resetSeq(ctx);
             return;
         }
-        if (this.#sequence[0] !== this.#sequence[1]) {
+        if (this.#board[this.#seq[0][1] + this.#rows][this.#seq[0][0]] !==
+            this.#board[this.#seq[1][1] + this.#rows][this.#seq[1][0]]) {
             this.resetSeq(ctx);
             return;
         }
         let t = 0n;
         const a = [];
-        const d = this.#sequence.at(-1);
-        let l = this.#board[this.#sequence[0][1]][this.#sequence[0][0]];
-        for (let v of this.#sequence.entries()) {
-            const q = this.#board[v[1][1]][v[1][0]] - l;
+        const d = this.#seq.at(-1);
+        let l = this.#board[this.#seq[0][1] + this.#rows][this.#seq[0][0]];
+        for (let v of this.#seq.entries()) {
+            const q = this.#board[v[1][1] + this.#rows][v[1][0]] - l;
             if (q !== 1n && q !== 0n) {
                 this.resetSeq(ctx);
                 return;
             }
-            t += 1n << this.#board[v[1][1]][v[1][0]];
-            a.push(new AnimationF(v[1], d, this.#board[v[1][1]][v[1][0]]));
-            this.#board[v[1][1]][v[1][0]] = 0n;
+            l = this.#board[v[1][1] + this.#rows][v[1][0]];
+            t += 1n << l;
+            a.push(new AnimationF(v[1], d, l));
+            this.#board[v[1][1] + this.#rows][v[1][0]] = 0n;
         }
-        this.draw(ctx, a, 1);
+        this.#interactable = !1;
         const i = BigInt((t - 1n).toString(2).length);
+        const dest = this.#seq.at(-1);
+        const animB = deepCopy2D(this.#board);
+        this.#board[dest[1] + this.#rows][dest[0]] = i;
         t = 1n << i;
         this.#score += t;
         this.#lscore += t;
@@ -220,143 +278,148 @@ class Board {
         if (this.#score >= 1000000n) score = `${this.#score} (${number(this.#score)})`;
         else score = `${this.#score}`;
         document.getElementById("score").textContent = `${lscore} / ${cap} (${score} pts, level ${this.#level})`;
-        this.gravity(ctx);
-        while (2n * this.#min + 10n < i) {
-            this.#min += 1n;
-            for (let [yi, yv] of this.#board.entries())
-                for (let [xi, xv] of yv.entries())
-                    if (xv < this.#min)
-                        this.#board[yi][xi] = 0n;
-        }
-        this.gravity(ctx);
+        this.draw(ctx, a, 1, animB, () => {
+            this.gravity(ctx, () => {
+                while (2n * this.#min + 10n < i) {
+                    this.#min += 1n;
+                    for (let [yi, yv] of this.#board.entries())
+                        for (let [xi, xv] of yv.entries())
+                            if (xv < this.#min)
+                                this.#board[yi][xi] = 0n;
+                }
+                this.gravity(ctx, () => {
+                    // fail condition check here
+                    this.#interactable = !0;
+                });
+            });
+        });
     }
     drawSeq(ctx, c, e) {
-        const p = mouseLocation(c, e);
-        requestAnimationFrame(() => {
-            ctx.fillStyle = "#a7692a";
-            ctx.fillRect(
-                0, 0,
-                (cellSize + separatorSize) * this.#cols + separatorSize,
-                (cellSize + separatorSize) * this.#rows + separatorSize
-            );
-            if (this.#sequence.length) {
-                function center ([x, y]) { 
+        cancelAnimationFrame(this.#animF);
+        this.#animF = 0;
+        this.#animS = 0;
+        const p = c && e ? mouseLocation(c, e) : null;
+        this.#animF = requestAnimationFrame(() => {
+            this.drawBoard(ctx, this.#board, () => {
+                if (!this.#seq.length) return;
+                function center([x, y]) {
                     return [
                         x * (cellSize + separatorSize) + separatorSize + cellSize / 2,
                         y * (cellSize + separatorSize) + separatorSize + cellSize / 2
                     ];
                 }
                 ctx.beginPath();
-                const [x1, y1] = center(this.#sequence[0]);
+                const [x1, y1] = center(this.#seq[0]);
                 ctx.moveTo(x1, y1);
-                for (const pos of this.#sequence.slice(1)) {
+                for (const pos of this.#seq.slice(1)) {
                     const [x2, y2] = center(pos);
                     ctx.lineTo(x2, y2);
                 }
                 const r2 = (cellSize / 2) ** 2;
-                const s = this.#board.slice(this.#cols).some((row, y) =>
+                const s = p && this.#board.slice(this.#rows).some((row, y) =>
                     row.some((t, x) => {
                         if (t === 0n) return false;
                         const [tx, ty] = center([x, y]);
                         return (p[0] - tx) ** 2 + (p[1] - ty) ** 2 < r2;
                     })
                 );
-                if (!s) ctx.lineTo(p[0], p[1]);
+                if (p && !s) ctx.lineTo(p[0], p[1]);
+                ctx.lineCap = "round";
+                ctx.lineJoin = "miter";
+                ctx.miterLimit = 1;
                 ctx.stroke();
-            }
-            // refactoring later
-            for (const [y, r] of this.#board.slice(this.#cols).entries())
-                for (const [x, t] of r.entries()) {
-                    if (t === 0n) continue;
-                    const tx = x * (cellSize + separatorSize) + separatorSize;
-                    const ty = y * (cellSize + separatorSize) + separatorSize;
-                    ctx.fillStyle = color(t);
-                    ctx.roundRect(tx, ty, cellSize, cellSize, 5);
-                    ctx.fill();
-                    ctx.fillStyle = "#FFF";
-                    ctx.fillText(number(2n ** t), tx + cellSize / 2, ty + cellSize / 2, cellSize);
-                }
-            ctx.restore();
+            });
+            this.#animF = 0;
         });
     }
+    drawBoard(ctx, board, drawU = null) {
+        const width = (cellSize + separatorSize) * this.#cols + separatorSize;
+        const height = (cellSize + separatorSize) * this.#rows + separatorSize;
+        ctx.fillStyle = "#a7692a";
+        ctx.beginPath();
+        ctx.roundRect(0, 0, width, height, 5);
+        ctx.fill();
+        if (drawU) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.roundRect(0, 0, width, height, 5);
+            ctx.clip();
+            drawU();
+            ctx.restore();
+        }
+        for (const [y, row] of board.slice(this.#rows).entries())
+            for (const [x, tile] of row.entries()) {
+                const tx = x * (cellSize + separatorSize) + separatorSize;
+                const ty = y * (cellSize + separatorSize) + separatorSize;
+                ctx.beginPath();
+                if (tile === 0n) {
+                    ctx.fillStyle = "#6e451c";
+                    ctx.roundRect(tx, ty, cellSize, cellSize, 5);
+                    ctx.fill();
+                    continue;
+                }
+                ctx.fillStyle = color(tile);
+                ctx.roundRect(tx, ty, cellSize, cellSize, 5);
+                ctx.fill();
+                ctx.fillStyle = "#FFF";
+                ctx.fillText(number(2n ** tile), tx + cellSize / 2, ty + cellSize / 2, cellSize);
+            }
+    }
     resetSeq(ctx) {
-        this.#sequence = [];
+        this.#seq = [];
         this.drawSeq(ctx);
     }
-    gravity(ctx) {  // never tested
-        let S = Array.from({length: this.#rows * 2}, () => Array(this.#cols).fill(0))
-        for (let y of this.#board.entries())
-            for (let x of y[1].entries())
-                S[y[0]][x[0]] = (y[0] < this.#rows * 2 - 1 && this.#board[y[0] + 1][x[0]] === 0n) >> 0;
-        if (!S.some(r => r.some(v => v))) return;
-        let placeholder = deepCopy2D(this.#board);
-        let anims = []
-        for (let y of this.#board.entries())
-            for (let x of y[1].entries())
-                if (x[1]) {
-                    anims.push(new AnimationF([x[0], y[0]], [x[0], y[0] + 1], x[1], t => t * t));
-                    this.#board[y[0]][x[0]] = 0n;
+    gravity(ctx, yay = () => {}) {
+        const board = Array.from({length: this.#rows * 2}, () => Array(this.#cols).fill(0n));
+        const anims = [];
+        const dests = [];
+        let moved = false;
+        for (let x = 0; x < this.#cols; x++) {
+            const tiles = [];
+            for (let y = 0; y < this.#rows * 2; y++)
+                if (this.#board[y][x] !== 0n)
+                    tiles.push([y, this.#board[y][x]]);
+            const firstY = this.#rows * 2 - tiles.length;
+            for (let i = 0; i < tiles.length; i++) {
+                const [fromY, tile] = tiles[i];
+                const toY = firstY + i;
+                board[toY][x] = tile;
+                if (fromY !== toY) {
+                    moved = true;
+                    dests.push([toY, x]);
+                    anims.push(new AnimationF([x, fromY - this.#rows], [x, toY - this.#rows], tile, t => t * t));
                 }
-        requestAnimationFrame(timestamp => this.draw(ctx, anims, 2, timestamp));
-        while (S.some(r => r.some(v => v))) {
-            this.#board = placeholder;
-            anims.length = [];
-            for (let y = this.#rows * 2 - 1; y >= 0; y--)
-                for (let x = 0; x < this.#cols; x++) {
-                    if (this.#board[y][x] !== 0n) {
-                        if (y > 0) {
-                            this.#board[y][x] = this.#board[y - 1][x];
-                            S[y][x] = S[y - 1][x];
-                            this.#board[y - 1][x] = 0n;
-                            S[y - 1][x] = 0;
-                        }
-                    }
-                    if (S[y][x] === 2) S[y][x] = 0;
-                    if (S[y][x] === 1 && (y < this.#rows * 2 - 1 || this.#board[y + 1][x] !== 0n))
-                        S[y][x] = 2;
-                    if (S[y][x] === 1) anims.push(new AnimationF([x, y - this.#rows], [x, y + 1 - this.#rows], this.#board[y][x]));
-                    if (S[y][x] === 2) anims.push(new AnimationF([x, y - this.#rows], [x, y - 1 - this.#rows], this.#board[y][x], x => x < (6 - sqrt6) / 5 ? 
-                        -(7 + 2 * sqrt6) *  x      * (5 * x + sqrt6 - 6) / 45
-                        :
-                        -(7 + 2 * sqrt6) * (x - 1) * (5 * x + sqrt6 - 6) / 45
-                    ));
-                }
-            placeholder = deepCopy2D(this.#board);
-            for (let y = this.#rows * 2 - 1; y >= 0; y--)
-                for (let x = 0; x < this.#cols; x++) 
-                    if (S[y][x]) this.#board[y][x] = 0n;
-            requestAnimationFrame(timestamp => this.draw(ctx, anims, 2, timestamp))
+            }
+            for (let y = 0; y < firstY; y++)
+                board[y][x] = this.#min + BigInt(this.#rand() % 6);
         }
-        for (let x = 0; x < this.#cols; x++)
-            for (let y = this.#rows - 1; y >= 0; y--)
-                if (!this.#board[y][x]) this.#board[y][x] = this.#min + BigInt(this.#rand() % 6);
+        this.#board = board;
+        if (!moved) {
+            yay();
+            return;
+        }
+        const animB = deepCopy2D(board);
+        for (const [y, x] of dests) animB[y][x] = 0n;
+        this.draw(ctx, anims, 2, animB, yay);
     }
-    draw(ctx, A, m = 1, T) {
-        if (!this.#animStart) this.#animStart = T;
-        const t = T - this.#animStart;
-        const alpha = t / interval * m
-        if (alpha >= 1) return;
-        ctx.fillStyle = "#a7692a"
-        ctx.fillRect(0, 0,
-            (cellSize + separatorSize) * this.#cols + separatorSize,
-            (cellSize + separatorSize) * this.#rows + separatorSize
-        )
-        for (let y of this.#board.slice(this.#cols).entries())
-            for (let x of y[1].entries())
-                if (x[1] !== 0n) (new AnimationF([x[0], y[0]], [x[0], y[0]], x[1])).tileDraw(ctx, 0);
-                else {
-                    ctx.fillStyle = "#6e451c";
-                    ctx.roundRect(
-                        x * (cellSize + separatorSize) + separatorSize,
-                        y * (cellSize + separatorSize) + separatorSize,
-                        cellSize,
-                        cellSize,
-                        5
-                    );
-                    ctx.fill();
-                }
-        for (let a of A) a.tileDraw(ctx, alpha);
-        requestAnimationFrame(timestamp => this.draw(ctx, A, m, timestamp));
+    draw(ctx, A, m = 1, animB = this.#board, yay = () => {}) {
+        cancelAnimationFrame(this.#animF);
+        this.#animS = 0;
+        const frame = timestamp => {
+            if (!this.#animS) this.#animS = timestamp;
+            const alpha = (timestamp - this.#animS) / interval * m;
+            if (alpha >= 1) {
+                this.drawBoard(ctx, this.#board);
+                this.#animS = 0;
+                this.#animF = 0;
+                yay();
+                return;
+            }
+            this.drawBoard(ctx, animB);
+            for (const a of A) a.tileDraw(ctx, alpha);
+            this.#animF = requestAnimationFrame(frame);
+        };
+        this.#animF = requestAnimationFrame(frame);
     }
 }
 
@@ -370,8 +433,10 @@ window.onload = () => {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
-    let board = new Board();
+    window.board = new Board();
+    let board = window.board;
     canvas.addEventListener('mousedown', (e) => board.mouseDown(canvas, e));
     canvas.addEventListener('mousemove', (e) => board.mouseDrag(canvas, e));
     window.addEventListener('mouseup',   (e) => board.mouseUp  (ctx   , e));
+    board.drawSeq(ctx);
 }
