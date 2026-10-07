@@ -58,12 +58,26 @@ canvas {
   display: block;
 }
 
+#field {
+  touch-action: none;
+}
+
 h1, h2, h3, h4, h5, h6 {
   margin: 0;
 }
 
 p {
   font-size: large;
+}
+
+.tile-current-tile-stripe {
+  width: 100%;
+  min-height: 1.5em;
+}
+
+#tile-current-tile-representation {
+  color: #fff;
+  margin: 0;
 }
 
 * {
