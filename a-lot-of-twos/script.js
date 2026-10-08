@@ -3,16 +3,27 @@ let cellSize = 50,
     font = "13px JetBrains Mono",  // hopefully
     interval = 200;  // ms
 
-const cacheKey = "a-lot-of-twos";
-const maxSeed = 0xffffffffffffffffn;
+const K = "a-lot-of-twos";
+const RK = `${K}-record`;
+const MAXSEED = 0xffffffffffffffffn;
 
 const sqrt6 = Math.sqrt(6);
 
 function idkHowToNameTheVariables(n){
-    const v = 1000n * n * n * 10n ** n / 9n ** n;
+    const v = 1000n * n * n * 21n ** n / 20n ** n;
     const d = v.toString().length;
     const f = 10n ** BigInt(d - 3);
     return v / f * f;
+}
+
+function getLevelScore(score, level) {
+    let remaining = score;
+    for (let currentLevel = 1n; currentLevel < level; currentLevel++) {
+        remaining -= idkHowToNameTheVariables(currentLevel);
+        if (remaining < 0n)
+            throw new RangeError("Cached score is inconsistent with the level.");
+    }
+    return remaining;
 }
 
 function quickRand() {
@@ -60,6 +71,7 @@ function cacheStateLoad(v) {
     const m = parseBigInt(v.min, "min");
     if (l < 1n || m < 1n)
         throw new RangeError("Cached game level and/or tile limit is out of range.");
+    const s = parseBigInt(v.score, "score");
     return {
         r,
         c,
@@ -67,31 +79,52 @@ function cacheStateLoad(v) {
         m,
         b,
         h,
-        r1: parseBigInt(v.rand1, "rand1", maxSeed),
-        r2: parseBigInt(v.rand2, "rand2", maxSeed),
-        pr1: parseBigInt(v.privateRand1, "privateRand1", maxSeed),
-        pr2: parseBigInt(v.privateRand2, "privateRand2", maxSeed),
-        s: parseBigInt(v.score, "score"),
-        ls: parseBigInt(v.lscore, "lscore")
+        r1: parseBigInt(v.rand1, "rand1", MAXSEED),
+        r2: parseBigInt(v.rand2, "rand2", MAXSEED),
+        pr1: parseBigInt(v.privateRand1, "privateRand1", MAXSEED),
+        pr2: parseBigInt(v.privateRand2, "privateRand2", MAXSEED),
+        s,
+        ls: getLevelScore(s, l)
     };
 }
 
 function cacheSave(board) {
     try {
-        localStorage.setItem(cacheKey, JSON.stringify(board.cacheState));
+        localStorage.setItem(K, JSON.stringify(board.cacheState));
         const msg = document.getElementById("messages");
         if (msg.textContent === "I'm sorry to inform you that games cannot be stored on this browser.")
             msg.textContent = "";
     } catch (e) {
-        console.error("Could not save the game cache.", e);
+        console.error("Could not save the game cache:", e);
         document.getElementById("messages").textContent =
             "I'm sorry to inform you that games cannot be stored on this browser.";
     }
 }
 
 function cacheLoad() {
-    const c = localStorage.getItem(cacheKey);
+    const c = localStorage.getItem(K);
     return c === null ? null : cacheStateLoad(JSON.parse(c));
+}
+
+function recordSave(b) {
+    const st = b.cacheState;
+    try {
+        const p = localStorage.getItem(RK);
+        let sc = 0n;
+        if (p !== null) {
+            try {
+                sc = cacheStateLoad(JSON.parse(p)).st;
+            } catch (e) {
+                console.error("An error occurred while loading the stored record board state:", e);
+            }
+        }
+        if (BigInt(st.score) <= sc) return;
+        localStorage.setItem(RK, JSON.stringify(st));
+    } catch (e) {
+        console.error("An error occurred while saving this record:", e);
+        document.getElementById("messages").textContent =
+            "Your play could not be saved in your browser. Please save it as a file if you wish to save.";
+    }
 }
 
 function mouseLocation(c, e) {
@@ -382,7 +415,12 @@ class Board {
                         this.#drawBoard(ctx, this.#board);
                         this.#gameOver = !this.#playOK();
                         this.#interactable = !this.#gameOver;
+                        this.#tileRepUpdate();
                         cacheSave(this);
+                        if (this.#gameOver) {
+                            recordSave(this);
+                            alert("Game over");
+                        }
                     }, false);
                 });
             });
@@ -405,6 +443,9 @@ class Board {
     }
     get cols() {
         return this.#cols;
+    }
+    get gameOver() {
+        return this.#gameOver;
     }
     pointerCancel(ctx) {
         if (!this.#dragging) return;
@@ -440,6 +481,13 @@ class Board {
     #tileRepUpdate() {
         const s = document.getElementById("tile-current-tile-stripe");
         const r = document.getElementById("tile-current-tile-representation");
+        if (this.#gameOver) {
+            r.textContent = "GAME OVER";
+            r.style.color = "red";
+            s.style.backgroundColor = "transparent";
+            return;
+        }
+        r.style.color = "#fff";
         if (this.#seq.length < 2) {
             r.textContent = "";
             s.style.backgroundColor = "transparent";
@@ -605,7 +653,6 @@ class Board {
             privateRand1: this.#rand1.toString(),
             privateRand2: this.#rand2.toString(),
             score: this.#score.toString(),
-            lscore: this.#lscore.toString(),
             level: this.#level.toString(),
             min: this.#min.toString(),
             board: this.#board.map(row => row.map(tile => tile.toString())),
@@ -640,7 +687,7 @@ window.onload = () => {
                 cachedState.rand2, ctx, cachedState)
             : new Board(6, 5, quickRand(), quickRand(), ctx);
     } catch (error) {
-        console.error("Could not load the cached game; starting a new board.", error);
+        console.error("Could not load the cached game; starting a new board:", error);
         document.getElementById("messages").textContent =
             "The saved game could not be loaded; a new board was started.";
         board = new Board(6, 5, quickRand(), quickRand(), ctx);
@@ -650,6 +697,7 @@ window.onload = () => {
     canvas.height = (cellSize + separatorSize) * board.rows + separatorSize;
     configureContext();
     cacheSave(board);
+    if (board.gameOver) recordSave(board);
     canvas.addEventListener('pointerdown', (e) => {
         if (!e.isPrimary || e.button !== 0) return;
         canvas.setPointerCapture(e.pointerId);
