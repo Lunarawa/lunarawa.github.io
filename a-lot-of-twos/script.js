@@ -452,6 +452,11 @@ class Board {
         this.#dragging = !1;
         this.#resetSeq(ctx);
     }
+    pointerContextMenu(ctx) {
+        if (!this.#dragging) return false;
+        this.pointerCancel(ctx);
+        return true;
+    }
     #targetOK([x, y]) {
         if (!this.#seq.length) return false;
         const tile = this.#board[y + this.#rows][x];
@@ -711,6 +716,9 @@ window.onload = () => {
     });
     canvas.addEventListener('pointercancel', (e) => {
         if (e.isPrimary) board.pointerCancel(ctx);
+    });
+    canvas.addEventListener('contextmenu', (e) => {
+        if (board.pointerContextMenu(ctx)) e.preventDefault();
     });
     document.getElementById("restart").addEventListener("click", () => {
         if (!confirm("Start a new game? Your current game will be replaced.")) return;
