@@ -21,7 +21,7 @@ const DIRECTIONS = [
 const sqrt6 = Math.sqrt(6);
 
 function idkHowToNameTheVariables(n){
-    const v = 1000n * n * n * 20n ** n / 19n ** n;  // to be fine-tuned
+    const v = 1000n * n * n * 5n ** n / 4n ** n;  // to be fine-tuned
     const d = v.toString().length;
     const f = 10n ** BigInt(d - 3);
     return v / f * f;

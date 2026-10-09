@@ -92,7 +92,7 @@ p {
   background-color: transparent;
   background-repeat: no-repeat;
   background-size: 0% 100%;
-  transition: background-size 200ms linear;
+  transition: background-size 1s cubic-bezier(0.333333, 0.666667, 0.666667, 1);
 }
 
 #score::after {
