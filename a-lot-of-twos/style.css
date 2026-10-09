@@ -27,6 +27,21 @@ button {
   padding: 10px;
 }
 
+.control, .settings {
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 8px;
+}
+
+.settings {
+  color: #ffa040;
+  text-shadow: 1px 1px #cf8234;
+}
+
+#animation-speed {
+  accent-color: #ffa040;
+}
+
 button:focus {
   background-color: #ffa040;
   box-shadow: 3px 3px #cf82347f;
@@ -69,6 +84,28 @@ h1, h2, h3, h4, h5, h6 {
 p {
   font-size: large;
   margin: 0;
+}
+
+#score {
+  position: relative;
+  isolation: isolate;
+  background-color: transparent;
+  background-repeat: no-repeat;
+  background-size: 0% 100%;
+  transition: background-size 200ms linear;
+}
+
+#score::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: 0;
+  bottom: 0;
+  left: var(--score-progress, 0%);
+  width: var(--score-ghost, 0%);
+  background-color: var(--score-color, transparent);
+  opacity: 0.75;
+  pointer-events: none;
 }
 
 .tile-current-tile-stripe {

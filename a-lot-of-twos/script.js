@@ -1,38 +1,94 @@
+// This script is MEANT to be within my personal project.
+// Do not take this as a proof for anything.
+// Seriously, why? It does not affect you anyways...
+// Just leave it as is bro...
+
+
 let cellSize = 50,
     separatorSize = 10,
     font = "13px JetBrains Mono",  // hopefully
-    interval = 200;  // ms
+    interval = 200,  // ms
+    pendingInterval = null;
 
 const K = "a-lot-of-twos";
 const RK = `${K}-record`;
 const MAXSEED = 0xffffffffffffffffn;
+const DIRECTIONS = [
+    [1, 0], [1, 1], [0, 1], [-1, 1],
+    [-1, 0], [-1, -1], [0, -1], [1, -1]
+];
 
 const sqrt6 = Math.sqrt(6);
 
 function idkHowToNameTheVariables(n){
-    const v = 1000n * n * n * 21n ** n / 20n ** n;
+    const v = 1000n * n * n * 20n ** n / 19n ** n;  // to be fine-tuned
     const d = v.toString().length;
     const f = 10n ** BigInt(d - 3);
     return v / f * f;
 }
 
-function getLevelScore(score, level) {
-    let remaining = score;
-    for (let currentLevel = 1n; currentLevel < level; currentLevel++) {
-        remaining -= idkHowToNameTheVariables(currentLevel);
-        if (remaining < 0n)
-            throw new RangeError("Cached score is inconsistent with the level.");
+function getLevelState(s) {
+    let r = s;
+    let l = 1n;
+    let c = idkHowToNameTheVariables(l);
+    while (r >= c) {
+        r -= c;
+        l++;
+        c = idkHowToNameTheVariables(l);
     }
-    return remaining;
+    return {l, levelScore: r};
 }
 
 function quickRand() {
-    return (BigInt(Math.floor(Math.random() * 0x100000000)) << 32n) + 
+    return (BigInt(Math.floor(Math.random() * 0x100000000)) << 32n) +
             BigInt(Math.floor(Math.random() * 0x100000000));
 }
 
 function deepCopy2D(a) {
     return a.map(r => r.slice());
+}
+
+class Writer {
+    b = [];
+    o = 0;
+    write(v, l) {
+        for (let i = l - 1; i >= 0; i--) {
+            if (this.o % 8 === 0) this.b.push(0);
+            this.b[this.b.length - 1] |= (v >> i & 1) << (7 - this.o % 8);
+            this.o++;
+        }
+    }
+    writeByte(v) {
+        this.write(v, 8);
+    }
+    done() {
+        return new Uint8Array(this.b);
+    }
+}
+
+class Reader {
+    constructor(b, o) {
+        this.b = b;
+        this.o = o * 8;
+    }
+    read(l) {
+        if (this.o + l > this.b.length * 8)
+            throw new TypeError("Playback file did not terminate properly.");
+        let v = 0;
+        for (let i = 0; i < l; i++) {
+            v = (v << 1) | ((this.b[Math.floor(this.o / 8)] >> (7 - this.o % 8)) & 1);
+            this.o++;
+        }
+        return v;
+    }
+    readByte() {
+        return this.read(8);
+    }
+    _0() {
+        while (this.o < this.b.length * 8)
+            if (this.read(1) !== 0) return false;
+        return true;
+    }
 }
 
 function cacheStateLoad(v) {
@@ -67,11 +123,11 @@ function cacheStateLoad(v) {
             throw new TypeError("Cached history is invalid. Sorry!");
         return [e[0].slice(), e[1].slice()];
     });
-    const l = parseBigInt(v.level, "level");
     const m = parseBigInt(v.min, "min");
-    if (l < 1n || m < 1n)
-        throw new RangeError("Cached game level and/or tile limit is out of range.");
+    if (m < 1n)
+        throw new RangeError("Cached game property \"minimum tile value\" is out of range.");
     const s = parseBigInt(v.score, "score");
+    const {l, levelScore: ls} = getLevelState(s);
     return {
         r,
         c,
@@ -84,7 +140,7 @@ function cacheStateLoad(v) {
         pr1: parseBigInt(v.privateRand1, "privateRand1", MAXSEED),
         pr2: parseBigInt(v.privateRand2, "privateRand2", MAXSEED),
         s,
-        ls: getLevelScore(s, l)
+        ls
     };
 }
 
@@ -113,7 +169,7 @@ function recordSave(b) {
         let sc = 0n;
         if (p !== null) {
             try {
-                sc = cacheStateLoad(JSON.parse(p)).st;
+                sc = cacheStateLoad(JSON.parse(p)).s;
             } catch (e) {
                 console.error("An error occurred while loading the stored record board state:", e);
             }
@@ -139,7 +195,7 @@ function color(n) {
           o1 = 0.25,
           o2 = 0.24,
           p1 = 0.00,
-          p2 = 0.10
+          p2 = 0.10,
           s = 60 + 20 * Math.sin(o1 * n + p1),
           l = 40 + 10 * Math.sin(o2 * n + p2);
     return `hsl(${h.toFixed(1)}, ${s.toFixed(1)}%, ${l.toFixed(1)}%)`;
@@ -251,6 +307,7 @@ class Board {
     #animF;
     #hist;
     #gameOver;
+    #playback;
     #rand() {
         const a = this.#rand1;
         this.#rand1 = (a * 6364136223846793005n + (this.#rand2 | 1n)) & 0xffffffffffffffffn;
@@ -261,6 +318,12 @@ class Board {
     constructor(a = 6, b = 5,
         c = window.quickRand(),
         d = window.quickRand(), ctx = window.ctx, state = null) {  // idk lmao
+        if (!Number.isInteger(a) || a < 1 || a > 256 ||
+            !Number.isInteger(b) || b < 1 || b > 256)
+            throw new RangeError("Provided board dimension is out of allowed range (1 to 256).");
+        if (state && (!Number.isInteger(state.r) || state.r < 1 || state.r > 256 ||
+            !Number.isInteger(state.c) || state.c < 1 || state.c > 256))
+            throw new RangeError("Provided board dimension is out of allowed range (1 to 256).");
         this.#rows = a,
         this.#cols = b,
         this.rand1 = c,
@@ -283,6 +346,7 @@ class Board {
             this.#gameOver = !this.#playOK();
             this.#interactable = !this.#gameOver;
             this.#dragging = false;
+            this.#playback = null;
             this.#seq = [];
             this.#animS = 0;
             this.#animF = 0;
@@ -309,6 +373,7 @@ class Board {
         this.#interactable = !0;
         this.#hist = [];
         this.#gameOver = false;
+        this.#playback = null;
         this.#updateScore();
     }
     pointerDown(c, e) {
@@ -346,8 +411,7 @@ class Board {
                     break;
                 }
             }
-        const validTarget = t && this.#targetOK(t);
-        if (validTarget) {
+        if (t && this.#targetOK(t)) {
             const I = this.#seq.findIndex(([x, y]) => x === t[0] && y === t[1]);
             if (I !== -1 && I === this.#seq.length - 2)
                 this.#seq.pop();
@@ -417,10 +481,7 @@ class Board {
                         this.#interactable = !this.#gameOver;
                         this.#tileRepUpdate();
                         cacheSave(this);
-                        if (this.#gameOver) {
-                            recordSave(this);
-                            alert("Game over");
-                        }
+                        this.#afterMove();
                     }, false);
                 });
             });
@@ -436,7 +497,22 @@ class Board {
         else cap = `${this.#cap}`;
         if (this.#score >= 1000000n) score = `${this.#score} (${number(this.#score)})`;
         else score = `${this.#score}`;
-        document.getElementById("score").textContent = `${lscore} / ${cap} (${score} pts, level ${this.#level})`;
+        const e = document.getElementById("score");
+        const p = Number(this.#lscore * 10000n / this.#cap) / 100;
+        let gp = this.#lscore;
+        if (this.#dragging && this.#sequenceOK()) {
+            gp += 1n << this.#getSequenceTile();
+            if (gp > this.#cap)
+                gp = this.#cap;
+        }
+        const pp = Number(gp * 10000n / this.#cap) / 100;
+        const c = color(this.#level);
+        e.textContent = `${lscore} / ${cap} (${score} pts, level ${this.#level})`;
+        e.style.backgroundImage = `linear-gradient(${c}, ${c})`;
+        e.style.backgroundSize = `${p}% 100%`;
+        e.style.setProperty("--score-progress", `${p}%`);
+        e.style.setProperty("--score-ghost", `${pp - p}%`);
+        e.style.setProperty("--score-color", c);
     }
     get rows() {
         return this.#rows;
@@ -447,12 +523,94 @@ class Board {
     get gameOver() {
         return this.#gameOver;
     }
+    get hasHistory() {
+        return this.#hist.length > 0;
+    }
+    get playbackActive() {
+        return this.#playback !== null;
+    }
+    get history() {
+        return this.#hist.map(([s, d]) => [s.slice(), d.slice()]);
+    }
+    playbackStart(h, ctx) {
+        if (!Array.isArray(h))
+            throw new TypeError("Playback type is invalid.");
+        this.#playback = {history: h, index: 0, ctx};
+        this.#interactable = false;
+        this.#playbackNext();
+    }
+    #playbackNext() {
+        if (!this.#playback) return;
+        if (this.#gameOver || this.#playback.index >= this.#playback.history.length) {
+            this.#finishPlayback();
+            return;
+        }
+        const [s, d] = this.#playback.history[this.#playback.index];
+        this.#seq = [s.slice()];
+        for (const dir of d) {
+            const [dx, dy] = DIRECTIONS[dir];
+            const [x, y] = this.#seq.at(-1);
+            const n = [x + dx, y + dy];
+            if (!this.#targetOK(n) || this.#seq.some(
+                ([sx, sy]) => sx === n[0] && sy === n[1]
+            )) {
+                this.#seq = [];
+                this.#stopPlayback("Playback stopped: invalid sequence encountered.");
+                return;
+            }
+            this.#seq.push(n);
+        }
+        if (!this.#sequenceOK()) {
+            this.#seq = [];
+            this.#stopPlayback("Playback stopped: invalid sequence.");
+            return;
+        }
+        this.#playback.index++;
+        this.#dragging = true;
+        this.pointerUp(this.#playback.ctx);
+    }
+    #afterMove() {
+        if (this.#playback) {
+            this.#interactable = false;
+            if (pendingInterval !== null) {
+                interval = pendingInterval;
+                pendingInterval = null;
+            }
+            this.#playbackNext();
+            return;
+        }
+        if (this.#gameOver) {
+            if (!document.getElementById("safe-mode").checked)
+                recordSave(this);
+            alert("Game over!");
+        }
+    }
+    #stopPlayback(m) {
+        const ctx = this.#playback.ctx;
+        this.#playback = null;
+        this.#interactable = !this.#gameOver;
+        this.#seq = [];
+        this.#dragging = false;
+        this.#tileRepUpdate();
+        this.#drawBoard(ctx, this.#board);
+        document.getElementById("messages").textContent = m;
+        window.setPlaybackControlsLocked(false);
+    }
+    #finishPlayback() {
+        this.#playback = null;
+        this.#interactable = !this.#gameOver;
+        if (this.#gameOver && !document.getElementById("safe-mode").checked)
+            recordSave(this);
+        this.#tileRepUpdate();
+        document.getElementById("messages").textContent = "Playback ended.";
+        window.setPlaybackControlsLocked(false, true);
+    }
     pointerCancel(ctx) {
         if (!this.#dragging) return;
         this.#dragging = !1;
         this.#resetSeq(ctx);
     }
-    pointerContextMenu(ctx) {
+    pointerAdditionalDown(ctx) {
         if (!this.#dragging) return false;
         this.pointerCancel(ctx);
         return true;
@@ -512,6 +670,7 @@ class Board {
     }
     drawSeq(ctx, c, e) {
         this.#tileRepUpdate();
+        this.#updateScore();
         cancelAnimationFrame(this.#animF);
         this.#animF = 0;
         this.#animS = 0;
@@ -658,29 +817,105 @@ class Board {
             privateRand1: this.#rand1.toString(),
             privateRand2: this.#rand2.toString(),
             score: this.#score.toString(),
-            level: this.#level.toString(),
             min: this.#min.toString(),
             board: this.#board.map(row => row.map(tile => tile.toString())),
             history: this.#hist
         };
     }
     createFile() {
-        // TODO
+        if (this.#rows > 256 || this.#cols > 256)
+            throw new RangeError("Board dimensions cannot exceed 256.");
+        if (this.rand1 > MAXSEED || this.rand2 > MAXSEED)
+            throw new RangeError("The initial seeds do not fit in the playback file format.");
+        const w = new Writer();
+        for (const [x, y] of this.#hist) {
+            w.write(1, 1);
+            w.writeByte(x[0]);
+            w.writeByte(x[1]);
+            for (const d of y) {
+                w.write(1, 1);
+                w.write(d, 3);
+            }
+            w.write(0, 1);
+        }
+        w.write(0, 1);
+        const bitstream = w.done();
+        const b = new Uint8Array(21 + bitstream.length);
+        b.set([0x67, 0x30, 0x3b, this.#cols - 1, this.#rows - 1]);
+        const writeSeed = (seed, offset) => {
+            for (let i = 7; i >= 0; i--)
+                b[offset + 7 - i] = Number((seed >> BigInt(i * 8)) & 0xffn);
+        };
+        writeSeed(this.rand1, 5);
+        writeSeed(this.rand2, 13);
+        b.set(bitstream, 21);
+        return new Blob([b], {type: "application/octet-stream"});
     }
-    static loadFile() {
-        // TODO
+    static loadFile(buffer) {
+        const b = new Uint8Array(buffer);
+        if (b.length < 22 ||
+            b[0] !== 0x67 || b[1] !== 0x30 || b[2] !== 0x3b)
+            throw new TypeError("This is not a valid playback file.");
+        const c = b[3] + 1;
+        const r = b[4] + 1;
+        const read64At = offset => {
+            let s = 0n;
+            for (let i = 0; i < 8; i++)
+                s = (s << 8n) | BigInt(b[offset + i]);
+            return s;
+        };
+        const rr = new Reader(b, 21);
+        const h = [];
+        let e = false;
+        while (rr.o < b.length * 8) {
+            if (rr.read(1) === 0) {
+                e = true;
+                break;
+            }
+            const x = rr.readByte();
+            const y = rr.readByte();
+            if (x >= c || y >= r)
+                throw new TypeError("Playback starting tile is outside the board.");
+            const d = [];
+            while (rr.read(1) === 1)
+                d.push(rr.read(3));
+            if (!d.length)
+                throw new TypeError("Playback contains an empty move.");
+            h.push([[x, y], d]);
+        }
+        if (!e || !rr._0())
+            throw new TypeError("Playback file has an invalid or incomplete ending.");
+        return {
+            rows: r,
+            cols: c,
+            rand1: read64At(5),
+            rand2: read64At(13),
+            history: h
+        };
     }
 }
 
 window.onload = () => {
     const canvas = document.getElementById('field');
     const ctx = canvas.getContext("2d");
+    const safeMode = document.getElementById("safe-mode");
+    try {
+        safeMode.checked = localStorage.getItem(`${K}-safe-mode`) === "true";
+    } catch (error) {
+        console.error("Could not load Safe Mode setting:", error);
+        document.getElementById("messages").textContent = "Safe Mode preference could not be loaded.";
+    }
     const configureContext = () => {
         ctx.strokeStyle = "#FF0";
         ctx.lineWidth = separatorSize;
         ctx.font = font;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
+    };
+    const setBoardSize = b => {
+        canvas.width = (cellSize + separatorSize) * b.cols + separatorSize;
+        canvas.height = (cellSize + separatorSize) * b.rows + separatorSize;
+        configureContext();
     };
 
     let board;
@@ -698,12 +933,15 @@ window.onload = () => {
         board = new Board(6, 5, quickRand(), quickRand(), ctx);
     }
     window.board = board;
-    canvas.width = (cellSize + separatorSize) * board.cols + separatorSize;
-    canvas.height = (cellSize + separatorSize) * board.rows + separatorSize;
-    configureContext();
+    setBoardSize(board);
     cacheSave(board);
-    if (board.gameOver) recordSave(board);
+    if (board.gameOver && !document.getElementById("safe-mode").checked)
+        recordSave(board);
     canvas.addEventListener('pointerdown', (e) => {
+        if (!e.isPrimary && board.pointerAdditionalDown(ctx)) {
+            e.preventDefault();
+            return;
+        }
         if (!e.isPrimary || e.button !== 0) return;
         canvas.setPointerCapture(e.pointerId);
         board.pointerDown(canvas, e);
@@ -717,18 +955,120 @@ window.onload = () => {
     canvas.addEventListener('pointercancel', (e) => {
         if (e.isPrimary) board.pointerCancel(ctx);
     });
-    canvas.addEventListener('contextmenu', (e) => {
-        if (board.pointerContextMenu(ctx)) e.preventDefault();
+    canvas.addEventListener('mousedown', (e) => {
+        if (e.button !== 0 && board.pointerAdditionalDown(ctx))
+            e.preventDefault();
     });
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     document.getElementById("restart").addEventListener("click", () => {
         if (!confirm("Start a new game? Your current game will be replaced.")) return;
+        const f = board;
         board = new Board(6, 5, quickRand(), quickRand(), ctx);
         window.board = board;
-        canvas.width = (cellSize + separatorSize) * board.cols + separatorSize;
-        canvas.height = (cellSize + separatorSize) * board.rows + separatorSize;
-        configureContext();
+        window.importedPlayback = null;
+        setBoardSize(board);
+        window.setPlaybackControlsLocked(false);
+        document.getElementById("messages").textContent = "";
         cacheSave(board);
+        if (!safeMode.checked)
+            recordSave(f);
         board.drawSeq(ctx);
     });
+    document.getElementById("export").addEventListener("click", () => {
+        try {
+            const f = board.createFile();
+            const url = URL.createObjectURL(f);
+            const l = document.createElement("a");
+            l.href = url;
+            l.download = `${new Date().toISOString().replaceAll(":", "-")}.lwa`;
+            const s = board.cacheState;
+            console.info("Playback exported:", {
+                fileName: l.download,
+                fileSizeBytes: f.size,
+                header: "g0;",
+                dimensions: {rows: board.rows, cols: board.cols},
+                seeds: {rand1: s.rand1, rand2: s.rand2},
+                moveCount: board.history.length,
+                history: board.history
+            });
+            l.click();
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error("Could not export playback:", error);
+            document.getElementById("messages").textContent = error.message;
+        }
+    });
+    const fi = document.getElementById("import-file");
+    document.getElementById("import").addEventListener("click", () => fi.click());
+    fi.addEventListener("change", async () => {
+        const f = fi.files[0];
+        fi.value = "";
+        if (!f) return;
+        try {
+            const i = Board.loadFile(await f.arrayBuffer());
+            if (board.hasHistory &&
+                !confirm("Importing this playback will overwrite the current game. Continue?"))
+                return;
+            board = new Board(
+                i.rows, i.cols, i.rand1, i.rand2, ctx
+            );
+            window.board = board;
+            setBoardSize(board);
+            board.drawSeq(ctx);
+            window.importedPlayback = i.history;
+            document.getElementById("playback").disabled = false;
+            document.getElementById("messages").textContent = "Playback loaded.";
+            console.info("Playback loaded:", {
+                fileName: f.name,
+                fileSizeBytes: f.size,
+                header: "g0;",
+                dimensions: {rows: i.rows, cols: i.cols},
+                seeds: {
+                    rand1: i.rand1.toString(),
+                    rand2: i.rand2.toString()
+                },
+                moveCount: i.history.length,
+                history: i.history
+            });
+            cacheSave(board);
+        } catch (e) {
+            console.error("Could not import playback:", e);
+            document.getElementById("messages").textContent = `Could not import playback: ${e.message}`;
+        }
+    });
+    document.getElementById("playback").addEventListener("click", () => {
+        if (!window.importedPlayback) return;
+        document.getElementById("messages").textContent = "";
+        document.getElementById("playback").disabled = true;
+        window.setPlaybackControlsLocked(true);
+        board.playbackStart(window.importedPlayback, ctx);
+    });
+    window.setPlaybackControlsLocked = (locked, playbackFinished = false) => {
+        for (const id of ["restart", "export", "import", "import-file"])
+            document.getElementById(id).disabled = locked;
+        document.getElementById("playback").disabled =
+            locked || playbackFinished || !window.importedPlayback;
+    };
+    const speed = document.getElementById("animation-speed");
+    const speedValue = document.getElementById("animation-speed-value");
+    const updateSpeed = () => {
+        const requestedInterval = Math.max(1, Number(speed.value));
+        if (board.playbackActive)
+            pendingInterval = requestedInterval;
+        else
+            interval = requestedInterval;
+        speedValue.textContent = `${speed.value} ms`;
+    };
+    speed.addEventListener("input", updateSpeed);
+    safeMode.addEventListener("change", () => {
+        try {
+            localStorage.setItem(`${K}-safe-mode`, String(safeMode.checked));
+        } catch (error) {
+            console.error("Could not save Safe Mode setting:", error);
+            document.getElementById("messages").textContent =
+                "Safe Mode preference could not be saved.";
+        }
+    });
+    updateSpeed();
     board.drawSeq(ctx);
 }

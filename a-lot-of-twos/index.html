@@ -24,7 +24,18 @@
         <canvas class="center" id="field" width="310" height="370">
             <p class="myself-small">Your device may not support canvas or JavaScript is disabled.</p>
         </canvas>
-        <button class="center" id="restart" type="button">Restart</button>
+        <div class="center control">
+            <button id="restart" type="button">Restart</button>
+            <button id="playback" type="button" disabled>Play Playback</button>
+            <button id="export" type="button">Export</button>
+            <button id="import" type="button">Import</button>
+            <input id="import-file" type="file" accept=".lwa,.bin" hidden>
+        </div>
+        <div class="center settings">
+            <label for="animation-speed">Animation speed: <span id="animation-speed-value">200 ms</span></label>
+            <input id="animation-speed" type="range" min="0" max="500" value="200">
+            <label for="safe-mode"><input id="safe-mode" type="checkbox"> Safe Mode</label>
+        </div>
         <p class="center myself-small" id="messages"></p>
     </body>
 </html>
