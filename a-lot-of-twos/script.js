@@ -508,11 +508,11 @@ class Board {
         const pp = Number(gp * 10000n / this.#cap) / 100;
         const c = color(this.#level);
         e.textContent = `${lscore} / ${cap} (${score} pts, level ${this.#level})`;
-        e.style.backgroundImage = `linear-gradient(${c}, ${c})`;
         e.style.backgroundSize = `${p}% 100%`;
         e.style.setProperty("--score-progress", `${p}%`);
         e.style.setProperty("--score-ghost", `${pp - p}%`);
         e.style.setProperty("--score-color", c);
+        document.getElementById("replay-progress").style.setProperty("--score-color", c);
     }
     get rows() {
         return this.#rows;
@@ -537,7 +537,17 @@ class Board {
             throw new TypeError("Playback type is invalid.");
         this.#playback = {history: h, index: 0, ctx};
         this.#interactable = false;
+        document.getElementById("replay-progress").hidden = false;
+        this.#updatePlaybackProgress();
         this.#playbackNext();
+    }
+    #updatePlaybackProgress() {
+        if (!this.#playback) return;
+        const {index, history} = this.#playback;
+        const progress = document.getElementById("replay-progress");
+        progress.textContent = `Replaying: ${index} / ${history.length}`;
+        const percentage = history.length ? index / history.length * 100 : 0;
+        progress.style.backgroundSize = `${percentage}% 100%`;
     }
     #playbackNext() {
         if (!this.#playback) return;
@@ -566,6 +576,7 @@ class Board {
             return;
         }
         this.#playback.index++;
+        this.#updatePlaybackProgress();
         this.#dragging = true;
         this.pointerUp(this.#playback.ctx);
     }
@@ -593,6 +604,7 @@ class Board {
         this.#dragging = false;
         this.#tileRepUpdate();
         this.#drawBoard(ctx, this.#board);
+        document.getElementById("replay-progress").hidden = true;
         document.getElementById("messages").textContent = m;
         window.setPlaybackControlsLocked(false);
     }
@@ -602,6 +614,7 @@ class Board {
         if (this.#gameOver && !document.getElementById("safe-mode").checked)
             recordSave(this);
         this.#tileRepUpdate();
+        document.getElementById("replay-progress").hidden = true;
         document.getElementById("messages").textContent = "Playback ended.";
         window.setPlaybackControlsLocked(false, true);
     }
@@ -874,17 +887,19 @@ class Board {
             }
             const x = rr.readByte();
             const y = rr.readByte();
-            if (x >= c || y >= r)
-                throw new TypeError("Playback starting tile is outside the board.");
+            if (x >= c || y >= r) {
+                console.error("The move starts with an out-of-bound tile.");
+                continue;
+            }
             const d = [];
             while (rr.read(1) === 1)
                 d.push(rr.read(3));
-            if (!d.length)
-                throw new TypeError("Playback contains an empty move.");
+            if (!d.length) {
+                console.error("Playback contains an empty move.");
+                continue;
+            }
             h.push([[x, y], d]);
         }
-        if (!e || !rr._0())
-            throw new TypeError("Playback file has an invalid or incomplete ending.");
         return {
             rows: r,
             cols: c,

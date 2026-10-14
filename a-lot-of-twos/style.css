@@ -90,9 +90,26 @@ p {
   position: relative;
   isolation: isolate;
   background-color: transparent;
+  background-image: linear-gradient(var(--score-color, transparent), var(--score-color, transparent));
   background-repeat: no-repeat;
   background-size: 0% 100%;
-  transition: background-size 1s cubic-bezier(0.333333, 0.666667, 0.666667, 1);
+  transition:
+    background-size 1s cubic-bezier(0.333333, 0.666667, 0.666667, 1),
+    --score-color 0.5s ease;
+}
+
+#replay-progress {
+  background-image: linear-gradient(var(--score-color, transparent), var(--score-color, transparent));
+  background-repeat: no-repeat;
+  background-size: 0% 100%;
+  font-size: 1.2em;
+  transition: --score-color 0.5s ease;
+}
+
+@property --score-color {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
 }
 
 #score::after {
